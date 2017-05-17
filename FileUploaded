@@ -1,0 +1,16 @@
+BufferedReader in = new BufferedReader(new InputStreamReader(uploadedFile.getInputstream()));
+String line = null;
+
+ArrayList<String[]> datos = new ArrayList<String[]>();
+StringBuilder responseData = new StringBuilder();
+while((line = in.readLine()) != null) {
+String [] array = line.split(";");
+//	   responseData.append(line);
+   datos.add(array);
+}
+
+System.out.println(datos);
+
+setQwerty(responseData.toString());
+
+setQwerty(datos.toString());
