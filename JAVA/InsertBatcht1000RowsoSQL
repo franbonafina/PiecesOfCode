@@ -1,0 +1,86 @@
+public void insertIIBBMasterFileLines(IIBBMasterFile IIBBMasterFile,
+                                          final List<String[]> dataList, final String username)
+                    throws SQLException {
+
+        if (null != IIBBMasterFile && null != IIBBMasterFile.getId() && null != dataList
+                        && !dataList.isEmpty()) {
+
+            final Long IIBBMasterFileId = IIBBMasterFile.getId();
+            String sql = "INSERT INTO TAX_IIBB_DATA "
+                            + "(IIBB_BATCH_ID, EFFDT, EFFDT_FROM, EFFDT_TO, TAX_ID, INSCRIPTION_TYPE, SITUATION_INDICATOR,RATE_CHANGE_MARK, TAX_RATE, WTHD_TAX_RATE, USE_NRO_GROUP, WTHD_NRO_GROUP, COMPANY_NAME, PROCESSED_FLG, DTTM_STAMP, MODIFIED_BY) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+            final SimpleDateFormat dateFormat = new SimpleDateFormat("ddmmyyyy");
+            template.batchUpdate(sql, new BatchPreparedStatementSetter() {
+
+                @Override
+                public void setValues(PreparedStatement ps, int i) throws SQLException {
+                    String[] line = dataList.get(i);
+                    if (line.length == LINEWIDTHTXT) {
+
+                        try {
+                            // IIBB_BATCH_ID
+                            ps.setLong(1, IIBBMasterFileId);
+
+                            // EFFDT
+                            Date date = dateFormat.parse(line[0]);
+                            java.sql.Date sqlDate = new java.sql.Date(date.getTime());
+                            ps.setDate(2, sqlDate);
+
+                            // EFFDT_FROM
+                            date = dateFormat.parse(line[1]);
+                            sqlDate = new java.sql.Date(date.getTime());
+                            ps.setDate(3, sqlDate);
+
+                            // EFFDT_TO
+                            date = dateFormat.parse(line[2]);
+                            sqlDate = new java.sql.Date(date.getTime());
+                            ps.setDate(4, sqlDate);
+
+                            // TAX_ID
+                            ps.setLong(5, Long.valueOf(line[3]));
+
+                            // INSCRIPTION_TYPE
+                            ps.setString(6, line[4]);
+
+                            // SITUATION_INDICATOR
+                            ps.setString(7, line[5]);
+
+                            // RATE_CHANGE_MARK
+                            ps.setString(8, line[6]);
+
+                            // TAX_RATE
+                            BigDecimal rate = new BigDecimal(line[7].replace(',', '.'));
+                            ps.setBigDecimal(9, rate);
+
+                            // WTHD_TAX_RATE
+                            rate = new BigDecimal(line[8].replace(',', '.'));
+                            ps.setBigDecimal(10, rate);
+
+                            // USE_NRO_GROUP
+                            ps.setString(11, line[9]);
+
+                            // WTHD_NRO_GROUP
+                            ps.setString(12, line[10]);
+
+                            // COMPANY_NAME
+                            ps.setString(13, line[10]);
+
+                            // PROCESSED_FLG
+                            ps.setInt(14, 0);
+
+                            // DTTM_STAMP
+                            date = new Date();
+                            sqlDate = new java.sql.Date(date.getTime());
+                            ps.setDate(15, sqlDate);
+
+                            // MODIFIED_BY
+                            ps.setString(16, username);
+
+                        } catch (ParseException e) {
+                            e.printStackTrace();
+                            throw new IllegalArgumentException("Bad IIBBMasterFile Line format");
+                        }
+                    }
+
+                }
