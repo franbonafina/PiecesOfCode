@@ -1,0 +1,7 @@
+Iterator iterator = diasPeriodo.entrySet().iterator();
+		while (iterator.hasNext()) {
+			Map.Entry pair = (Map.Entry) iterator.next();
+			if (!pair.getKey().equals(periodoActual)) {
+				this.diasGanadosPeriodoPasado += (Integer) pair.getValue();
+			}
+		}
