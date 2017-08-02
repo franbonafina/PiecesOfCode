@@ -1,0 +1,405 @@
+create or replace PACKAGE BODY            "NEXUS_SERVICE" 
+AS 
+  --INSERTA DATOS A VACACIONES DESDE NEXUS
+  PROCEDURE insert_vacaciones(
+      pLegajo  NUMBER,
+      pPeriodo NUMBER)
+  AS
+  
+  vSaldoDiasPeriodo NUMBER(3) := 0;
+  
+  BEGIN
+  
+    vSaldoDiasPeriodo := saldo_dias_periodo(pLegajo, pPeriodo);  
+    
+    
+    --Evitamos insertar registros de vacaciones de legajos que no tienen saldo para el periodo dado
+    IF vSaldoDiasPeriodo > 0 THEN
+    
+      INSERT INTO vacaciones (
+        id_vacaciones, legajo, cantidad_dias_a_gozar, periodo, estado)
+      VALUES (
+        seq_vacaciones_id.nextval,
+        pLegajo,
+        0,
+        pPeriodo,
+        5 --ESTADO 5 ES EL INICIAL "PENDIENTE DE ENVIAR"
+      );
+      
+      --SE IMPLEMENTA ESTE INSERT HASTA QUE EL NEGOCIO SOPORTE SALDO DE PERIODOS ANTERIORES
+      --EL SALDO DE PERIODOS ANTERIORES SE CARGA HACIENDO UN INSERT DE LOS DATOS PASADOS POR RRHH EN UN EXCEL
+      INSERT INTO vacaciones_saldo_periodo 
+      (id_saldo_periodo, periodo, legajo, periodo_ganado, dias_ganados)
+      VALUES (  
+        seq_saldo_periodo_id.nextval, 
+        pPeriodo,
+        pLegajo,
+        pPeriodo, --inserta el mismo periodo mientras el negocio no soporte periodo anterior 
+        vSaldoDiasPeriodo --para periodos anteriores se cargaran a mano en base a un excel de rrhh
+      );
+      
+    END IF; --vSaldoDiasPeriodo > 0
+    
+    
+  END insert_vacaciones;
+  
+  ------------------------------------------------------------------------------
+  
+     --CONSULTA Y TRAE DIAS POR CADA LEGAJO PARA EL PERIODO
+  FUNCTION saldo_dias_periodo(
+      pLegajo  NUMBER,
+      pPeriodo NUMBER)
+    RETURN NUMBER
+  IS
+    vRetorno NUMBER;
+  BEGIN
+    SELECT NVL(ne.dias_vaca_ganado, 0) + NVL(ne.dias_habil_ganado, 0) + NVL(ne.dias_vaca_adic, 0)
+    INTO vRetorno
+    FROM s_plan_vaca ne
+    WHERE ne.nro_leg    = pLegajo
+    AND ne.periodo_vaca = pPeriodo;
+    
+    RETURN vRetorno;
+  EXCEPTION
+  WHEN OTHERS THEN
+    vRetorno := 0;
+    ERRORLOG_TAPI.ins(
+      p_FECHAHORA => sysdate,
+      p_ORIGEN => 'NEXUS_SERVICE.SALDO_DIAS_PERIODO',
+      p_DESCRIPCION => 'El Legajo ' || pLegajo || ' tiene 0 saldo en S_PLAN_VACA para el Periodo: ' || pPeriodo||'.'|| SQLERRM);
+  END saldo_dias_periodo; 
+  
+ ------------------------------------------------------------------------------
+  
+  FUNCTION auditar_legajo(
+      pLegajo  NUMBER,
+      pPeriodo VARCHAR2,
+      pUsuario VARCHAR2,
+      pGerencia VARCHAR2)
+    RETURN VARCHAR2
+  AS 
+    v_nro_leg       NUMBER(10);
+    v_periodo_vaca  CHAR(4);
+    
+    v_fec_desde_baja1       DATE;
+    v_dias_vaca_goz_baja1   NUMBER(2);
+
+    v_fec_desde_baja2       DATE;
+    v_dias_vaca_goz_baja2   NUMBER(2);
+
+    v_fec_desde_baja3       DATE;
+    v_dias_vaca_goz_baja3   NUMBER(2);
+   
+    v_fec_desde_baja4       DATE;
+    v_dias_vaca_goz_baja4   NUMBER(2);
+    
+    v_fec_desde_baja5       DATE;
+    v_dias_vaca_goz_baja5   NUMBER(2);
+    
+    v_fec_desde_alta1       DATE;
+    v_dias_vaca_goz_alta1   NUMBER(2);
+   
+    v_fec_desde_alta2       DATE;
+    v_dias_vaca_goz_alta2   NUMBER(2);
+    
+    v_fec_desde_alta3       DATE;
+    v_dias_vaca_goz_alta3   NUMBER(2);
+    
+    v_fec_desde_alta4       DATE;
+    v_dias_vaca_goz_alta4   NUMBER(2);
+    
+    v_fec_desde_alta5       DATE;
+    v_dias_vaca_goz_alta5   NUMBER(2);
+    
+    log_id NUMBER(6) := NULL;
+    counter NUMBER(2) := 0;
+    v_error  VARCHAR2(4000) DEFAULT NULL;
+    --v_utiliza_interfaz_nexus CHAR DEFAULT NULL; -- No está implementado cuando el valor es "N"
+    --v_utiliza_nueva_interfaz_nexus CHAR DEFAULT NULL; --Define S por nueva interfaz, N por la vieja interfaz
+    cursor c_altas is
+      SELECT 
+        v.id_vacaciones,
+        v.legajo,
+        v.fecha_desde,
+        v.cantidad_dias_a_gozar,
+        v.periodo,
+        v.estado,
+        v.id_motivo_no_carga
+      FROM vacaciones v
+      WHERE v.legajo = pLegajo -- param
+        AND v.periodo = pPeriodo -- param
+        AND v.estado   = 0; --0 = Estado Pendiente de AUDITAR 
+         
+    
+    cursor c_bajas is 
+      --bajas a vacaciones auditadas que fueron modificadas
+      SELECT 
+        v.legajo,
+        v.periodo,
+        h.id,
+        h.id_vacaciones,
+        h.fecha_actualizacion,
+        h.accion,
+        h.usuario,
+        h.fecha_desde,
+        h.cantidad_dias,
+        h.estado,
+        h.motivo_no_carga
+      FROM log_vacaciones h,
+        vacaciones v
+      WHERE v.id_vacaciones  = h.id_vacaciones
+      AND v.legajo           = pLegajo
+      AND v.periodo          = pPeriodo
+      AND v.estado          = 0
+      AND h.motivo_no_carga IS NULL
+      AND h.id =
+        (SELECT MAX(id)
+        FROM log_vacaciones
+        WHERE id_vacaciones = h.id_vacaciones
+        AND estado          = 1)
+      
+      UNION
+      
+      --bajas a vacaciones auditadas que fueron eliminadas
+--      SELECT h.id,
+--        h.id_vacaciones,
+--        h.fecha_actualizacion,
+--       h.accion,
+--        h.usuario,
+--        h.fecha_desde,
+  --      h.cantidad_dias,
+    --    h.estado,
+      --  h.motivo_no_carga
+      --FROM log_vacaciones h,
+        --vacaciones v
+      --WHERE v.id_vacaciones  = h.id_vacaciones
+      --AND v.legajo           = pLegajo
+      --AND v.periodo          = pPeriodo
+      --AND v.estado          = 3 --Fue eliminada por el gerente
+      --AND h.motivo_no_carga IS NULL
+      --AND h.estado          = 3 --no fue dada de baja en la interfaz aun
+      --AND h.id = 
+        --(SELECT max(id)
+        --FROM log_vacaciones
+        --WHERE id_vacaciones = h.id_vacaciones)--Para obtener solo los logs de vacaciones que no hallan sido borrado de la interfaz
+      --AND v.id_vacaciones in ( 
+        --      SELECT id_vacaciones FROM log_vacaciones
+          --    WHERE log_vacaciones.estado = 1);-- Para que solo agrege como baja a los logs de vacaciones que ya fueron auditadas
+  
+  
+      --bajas a vacaciones auditadas que fueron eliminadas y aun no fueron dadas como bajas en la interfaz
+      SELECT 
+        v.legajo,
+        v.periodo,
+        h.id,
+        h.id_vacaciones,
+        h.fecha_actualizacion,
+        h.accion,
+        h.usuario,
+        h.fecha_desde,
+        h.cantidad_dias,
+        h.estado,
+        h.motivo_no_carga
+      FROM log_vacaciones h,
+        vacaciones v
+      WHERE v.id_vacaciones  = h.id_vacaciones
+      AND v.legajo           = pLegajo
+      AND v.periodo          = pPeriodo
+      AND v.estado           = 3 --Fue eliminada por el gerente
+      AND h.motivo_no_carga IS NULL
+      AND h.estado           = 1 --no fue dada de baja en la interfaz aun
+        --AND h.id =
+        --(SELECT max(id) FROM log_vacaciones WHERE id_vacaciones = h.id_vacaciones WHERE l.estado = 1)
+      AND v.id_vacaciones NOT IN
+        ( SELECT l.id_vacaciones FROM log_vacaciones l WHERE l.estado = 10);
+        
+  
+  BEGIN    
+    
+--    open c_altas;
+--
+--    DBMS_OUTPUT.PUT_LINE('ANTES IF c_altas%FOUND  THEN');
+--    IF c_altas%FOUND  THEN
+--    DBMS_OUTPUT.PUT_LINE('ADENTRO: IF c_altas%FOUND  THEN');
+      
+      BEGIN
+        
+       
+        FOR b IN c_bajas
+          LOOP          
+            BEGIN               
+              CASE counter
+                when 0 then    
+                  v_nro_leg := b.legajo;
+                  v_periodo_vaca := b.periodo;
+                  --BAJA1
+                  v_fec_desde_baja1 := b.fecha_desde;
+                  v_dias_vaca_goz_baja1 := b.cantidad_dias;
+                
+                when 1 then
+                  --BAJA2
+                  v_fec_desde_baja2 := b.fecha_desde;
+                  v_dias_vaca_goz_baja2 := b.cantidad_dias;
+                  
+                when 2 then
+                  --BAJA3
+                  v_fec_desde_baja3 := b.fecha_desde;
+                  v_dias_vaca_goz_baja3 := b.cantidad_dias;
+                when 3 then
+                  --BAJA4
+                  v_fec_desde_baja4 := b.fecha_desde;
+                  v_dias_vaca_goz_baja4 := b.cantidad_dias;
+                when 4 then
+                  --BAJA5
+                  v_fec_desde_baja5 := b.fecha_desde;
+                  v_dias_vaca_goz_baja5 := b.cantidad_dias;
+                  
+              END CASE;                
+              
+                --Registro en el log la baja de la vacacion en la interfaz 
+                SELECT seq_log_id.nextval INTO log_id FROM dual;
+                INSERT
+                INTO log_vacaciones VALUES
+                  (
+                    log_id,
+                    b.id_vacaciones,
+                    sysdate,
+                    'INTERFAZ DELETE',
+                    b.usuario,
+                    b.fecha_desde,
+                    b.cantidad_dias,
+                    10, -- estado = 10 es insertado como baja en la interfaz
+                    b.motivo_no_carga,
+                    pGerencia
+                  );
+                                
+              counter := counter + 1; -- Incrementamos la variable contador
+              
+            EXCEPTION WHEN others THEN
+              ROLLBACK;
+              v_error := 'error';
+            END;
+          END LOOP;
+          
+          
+          counter := 0; --Reset del contador
+          FOR c IN c_altas
+       
+          LOOP          
+            IF c.id_motivo_no_carga is not null then
+              BEGIN
+                UPDATE vacaciones
+                  SET estado = 1
+                  WHERE id_vacaciones = c.id_vacaciones;
+              END;
+            ELSE
+              BEGIN 
+                
+                CASE counter
+                  when 0 then --baja y alta 1
+                    v_nro_leg := c.legajo;
+                    v_periodo_vaca := c.periodo;
+                    
+                    --ALTA1
+                    v_fec_desde_alta1 := c.fecha_desde;
+                    v_dias_vaca_goz_alta1 := c.cantidad_dias_a_gozar;
+                  
+                  when 1 then
+                    --ALTA2
+                    v_fec_desde_alta2 := c.fecha_desde;
+                    v_dias_vaca_goz_alta2 := c.cantidad_dias_a_gozar;
+                    
+                  when 2 then
+                    --ALTA3
+                    v_fec_desde_alta3 := c.fecha_desde;
+                    v_dias_vaca_goz_alta3 := c.cantidad_dias_a_gozar;
+                  when 3 then
+                    --ALTA4
+                    v_fec_desde_alta4 := c.fecha_desde;
+                    v_dias_vaca_goz_alta4 := c.cantidad_dias_a_gozar;
+                  when 4 then
+                    --ALTA5
+                    v_fec_desde_alta5 := c.fecha_desde;
+                    v_dias_vaca_goz_alta5 := c.cantidad_dias_a_gozar;
+                    
+                END CASE;
+                      
+                
+                
+--                UPDATE vacaciones
+--                  SET estado = 1
+--                  WHERE id_vacaciones = c.id_vacaciones;
+                  
+--              DBMS_OUTPUT.PUT_LINE('ERROR ' || v_error);
+--              DBMS_OUTPUT.PUT_LINE('COUNTER ' || counter);
+--              DBMS_OUTPUT.PUT_LINE('ESTADO UPDATE? ' || c.estado );
+    
+                counter := counter + 1; -- Incrementamos la variable contador
+                
+              EXCEPTION WHEN others THEN
+                ROLLBACK;
+                v_error := 'error';
+              END;
+            END IF; --END IF c.id_motivo_no_carga is not null
+          END LOOP;
+          
+          --INSERT EN LA INTERFAZ A TRAVES DE LA API INS
+          --VERIFICA QUE EL REGISTRO TENGA SETEADO UN LEGAJO
+          IF v_nro_leg IS NOT NULL THEN
+          
+              NEXUS_INTERFACE_TAPI.INS(
+                  p_NRO_LEG => v_nro_leg,
+                  p_PERIODO_VACA => v_periodo_vaca,
+                  
+                  
+                  --BAJA1
+                  p_FEC_DESDE_BAJA1 => v_fec_desde_baja1,
+                  p_DIAS_VACA_GOZ_BAJA1 => v_dias_vaca_goz_baja1,
+                  --BAJA2
+                  p_FEC_DESDE_BAJA2 => v_fec_desde_baja2,
+                  p_DIAS_VACA_GOZ_BAJA2 => v_dias_vaca_goz_baja2,
+                  --BAJA3
+                  p_FEC_DESDE_BAJA3 => v_fec_desde_baja3,
+                  p_DIAS_VACA_GOZ_BAJA3 => v_dias_vaca_goz_baja3,
+                  --BAJA4
+                  p_FEC_DESDE_BAJA4 => v_fec_desde_baja4,
+                  p_DIAS_VACA_GOZ_BAJA4 => v_dias_vaca_goz_baja4,
+                  --BAJA5
+                  p_FEC_DESDE_BAJA5 => v_fec_desde_baja5,
+                  p_DIAS_VACA_GOZ_BAJA5 => v_dias_vaca_goz_baja5,
+                  
+                  
+                  --ALTA1
+                  p_FEC_DESDE_ALTA1 => v_fec_desde_alta1,
+                  p_DIAS_VACA_GOZ_ALTA1 => v_dias_vaca_goz_alta1,
+                  --ALTA2
+                  p_FEC_DESDE_ALTA2 => v_fec_desde_alta2,
+                  p_DIAS_VACA_GOZ_ALTA2 => v_dias_vaca_goz_alta2,
+                  --ALTA3
+                  p_FEC_DESDE_ALTA3 => v_fec_desde_alta3,
+                  p_DIAS_VACA_GOZ_ALTA3 => v_dias_vaca_goz_alta3,
+                  --ALTA4
+                  p_FEC_DESDE_ALTA4 => v_fec_desde_alta4,
+                  p_DIAS_VACA_GOZ_ALTA4 => v_dias_vaca_goz_alta4,
+                  --ALTA5
+                  p_FEC_DESDE_ALTA5 => v_fec_desde_alta5,
+                  p_DIAS_VACA_GOZ_ALTA5 => v_dias_vaca_goz_alta5,
+                  
+                  --GENER
+                  p_ID_USUARIO_GENER => pUsuario, --param
+                  p_FEC_HORA_GENER => sysdate,
+                  p_ESTADO => 'GENE'
+                );
+          END IF; 
+      END;
+--    END IF;
+--    close c_altas; --if c_alta%found
+    IF v_error IS NULL THEN
+      RETURN NULL;
+    ELSE
+      DBMS_OUTPUT.PUT_LINE('ERROR ' || v_error);
+      RETURN v_error;
+    END IF;
+    COMMIT;
+  END auditar_legajo;
+END Nexus_service;
