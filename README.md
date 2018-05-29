@@ -1,2 +1,2 @@
-# PiecesOfCode
-There're several pieces of code that do specific thing
+# Structures (Memory Concept)
+There're several different pieces that talk of pattern 
