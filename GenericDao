@@ -1,0 +1,107 @@
+package ar.com.retcon.dao.common;
+
+import java.io.Serializable;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+
+import org.springframework.beans.factory.annotation.Autowired;
+
+import com.avaje.ebean.EbeanServer;
+import com.avaje.ebean.Expr;
+import com.avaje.ebean.ExpressionList;
+import com.avaje.ebean.Query;
+import com.avaje.ebean.annotation.Transactional;
+
+import ar.com.retcon.domain.impl.BaseModel;
+
+public class GenericEbeanDao<M extends BaseModel<PK>, PK extends Serializable> implements IGenericDao<M, PK> {
+
+	protected final Class<M> modelClass;
+
+	@Autowired
+	protected EbeanServer server;
+
+	public GenericEbeanDao(Class<M> clazz) {
+		modelClass = clazz;
+	}
+
+	public List<M> findAll() {
+		Query<M> query = server.find(modelClass);
+		query = fetch(query);
+		List<M> list = query.findList();
+		return list;
+	}
+
+	public List<M> filter(List<Filter> filters) {
+		Query<M> q = server.createQuery(modelClass);
+		ExpressionList<M> expressions = q.where();
+		Iterator<Filter> filter = filters.iterator();
+
+		while (filter.hasNext()) {
+			Filter.addFilterExpressions(filter.next(), expressions);
+		}
+
+		List<M> list = expressions.findList();
+
+		return list;
+	}
+
+	public M read(PK id) {
+		Query<M> q = server.find(modelClass);
+		q = fetch(q);
+		M model = (M) q.where().idEq(id).findUnique();
+		return model;
+	}
+
+	@Transactional
+	public M create(M model) {
+		server.save(model);
+		return model;
+	}
+
+	@Transactional
+	public M update(M model) {
+		server.update(model);
+		return model;
+	}
+
+	@Transactional
+	public boolean delete(M model) {
+		boolean result = server.delete(model);
+		return result;
+	}
+
+	@Transactional
+	public M save(M model) {
+		server.save(model);
+		M m = this.read(model.getPk());
+		return m;
+
+	}
+
+	public int countAll() {
+		int count = server.find(modelClass).findCount();
+		return count;
+	}
+
+	public List<M> filter(Map<String, Object> filterParams) {
+		Query<M> q = server.createQuery(modelClass);
+		q = fetch(q);
+		ExpressionList<M> expressions = q.where();
+
+		for (Entry<String, Object> param : filterParams.entrySet()) {
+			expressions.add(Expr.eq(param.getKey(), param.getValue()));
+		}
+
+		List<M> list = expressions.findList();
+
+		return list;
+	}
+
+	protected Query<M> fetch(Query<M> query) {
+		return query;
+	}
+
+}
